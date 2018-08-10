@@ -1,11 +1,13 @@
 import numpy as np
+from numpy import random
 from keras.preprocessing.text import Tokenizer
+from keras.preprocessing.sequence import pad_sequences
 
-def generate_big_text(txtfile):
+def generate_big_text(txtfile, encoding='gbk'):
     
     texts = ''
 
-    with open(txtfile, 'r', encoding='utf-8') as fopen:
+    with open(txtfile, 'r', encoding=encoding) as fopen:
         for i, line in enumerate(fopen):
             
             # use 10000 lines for test
@@ -16,38 +18,55 @@ def generate_big_text(txtfile):
     texts = texts.lower()
     return texts
 
-def sentence_reader(texts, maxlen, charindex, mode='train'):
-    
-    def reader():
-        for i in np.arange(0, len(texts), maxlen):
-            if (i+maxlen>=len(texts)) and mode=='train':
-                break
-            text = texts[i:i+maxlen]
-            sent_X = []
-            for char in text:            
-                
-                char_idx = charindex[char]
-                feat_list = [1 if x==char_idx else 0 for x in range(len(charindex))]
-                sent_X.append(feat_list)
+def generate_sentences(texts, maxlen, tokenizer, mode='train'):
+    charindex = tokenizer.word_index
+    seq_X = []
+    y = []
+    for i in np.arange(1, len(texts)):
+        if i-maxlen < 0:
+            sent_X = texts[:i]
+        else:
+            sent_X = texts[i-maxlen:i]
+        sent_y = charindex[texts[i]]
+        seq_X.append(sent_X)
+        y.append(sent_y)
+    X = tokenizer.texts_to_sequences(seq_X)
+    X = pad_sequences(X, maxlen=maxlen, padding='pre', truncating='post', value=0)
 
-            if mode=='test':
-                yield(sent_X)
-            else:
-                sent_y = [1 if x==charindex[texts[i+maxlen]] else 0 for x in range(len(charindex))]
-                yield (sent_X, sent_y)
-    return reader
+    return X, y
+
+def negative_sample_array(tokenizer, negative_array_size=1e7):
+    """
+    """
+    word_count = tokenizer.word_counts
+    word_count_refine = dict((_[0],_[1]**0.75) for _ in word_count.items())
+    refine_cnt = sum(_[1] for _ in word_count_refine.items())
+    word_freq = dict((_[0], _[1]/refine_cnt) for _ in word_count_refine.items())       
+
+    negative_array = []
+
+    i = 0    
+    for word, freq in word_freq.items():
+        if i >= negative_array_size: break
+        word_num = round(freq*negative_array_size)
+        for _ in range(word_num):
+            if i >= negative_array_size: continue
+            word_idx = tokenizer.word_index[word]
+            negative_array.append(word_idx)
+            i += 1
+    
+    random.seed(1)
+    random.shuffle(negative_array)
+    return negative_array
 
 if __name__ == '__main__':
-    texts = generate_big_text('C:/Users/risson.yao/word2vec/testpage.txt')
-    tok = Tokenizer(char_level=True)
+    texts = generate_big_text('test.txt','gbk')
+    tok = Tokenizer(char_level=True, oov_token='<UNK>')
     tok.fit_on_texts([texts])
     ci = tok.word_index
-    print(ci)
+     
+    a,b = generate_sentences(texts, 5, tok, 'train')
 
-    print(texts[:10])
-    
-    reader = sentence_reader(texts[:10],10,ci,'test')
+    nsp = negative_sample_array(tok, 10000)
 
-    a = next(reader)
-        
-    print(a)
+    print(nsp[:len(a)])
